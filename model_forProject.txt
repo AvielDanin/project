@@ -1,0 +1,134 @@
+import pandas as pd
+from sklearn.preprocessing import MinMaxScaler
+import numpy as np
+from itertools import combinations
+from PIL import Image
+from sklearn.model_selection import train_test_split
+import os
+import tensorflow as tf
+import itertools
+from PIL import Image
+from keras.layers import  Lambda
+from tensorflow.keras.layers import Input, Dense, Conv2D, MaxPooling2D, Flatten,Reshape
+from tensorflow.keras.models import Model
+from scipy.spatial import distance
+import torch
+from tensorflow.keras import backend as K
+import cv2
+
+
+
+
+
+# Define the input shape for the images
+input_shape = (128, 128, 3)
+
+# Create the input layer for the first image
+input_1 = Input(input_shape)
+# Create the first convolutional layer for the first image
+conv_1_1 = Conv2D(16, (3,3), activation='relu')(input_1)
+# Create the second convolutional layer for the first image
+conv_1_2 = Conv2D(32, (3,3), activation='relu')(conv_1_1)
+# Create the max pooling layer for the first image
+maxpool_1 = MaxPooling2D((2,2))(conv_1_2)
+# Create the flatten layer for the first image
+flatten_1 = Flatten()(maxpool_1)
+
+
+# Create the input layer for the second image
+input_2 = Input(input_shape)
+# Create the first convolutional layer for the second image
+conv_2_1 = Conv2D(16, (3,3), activation='relu')(input_2)
+# Create the second convolutional layer for the second image
+conv_2_2 = Conv2D(32, (3,3), activation='relu')(conv_2_1)
+# Create the max pooling layer for the second image
+maxpool_2 = MaxPooling2D((2,2))(conv_2_2)
+# Create the flatten layer for the second image
+flatten_2 = Flatten()(maxpool_2)
+
+from tensorflow.keras.losses import cosine_similarity
+
+# Calculate the cosine similarity between the two images
+merge_layer = cosine_similarity(flatten_1, flatten_2)
+
+# Reshape the output of the cosine similarity function to have shape (batch_size, 1)
+merge_layer = Reshape((1,))(merge_layer)
+
+# Add a dense layer with one output unit
+output = Dense(1)(merge_layer)
+
+# Reshape the output of the dense layer to have shape (batch_size,)
+output = Reshape((1,))(output)
+
+
+model = Model([input_1, input_2],output)
+
+# Compile the model with the appropriate loss function and optimizer
+model.compile(loss='mean_squared_error', optimizer='adam')
+
+
+
+
+
+%%time
+
+def process_chunk(chunk):
+    left_images_train = []
+    right_images_train = []
+    y_train = []
+    
+    left_filenames = chunk['a']
+    right_filenames = chunk['b']
+    
+    img_size = (128,128)
+    
+    for left_filename, right_filename in zip(left_filenames,right_filenames):
+        try:
+            path1 = "C:/Users/aviel/Desktop/קורס למידת עמוקה/images/0"+str(left_filename)[:2]+'/0'+str(left_filename)+'.jpg'
+            path2 = "C:/Users/aviel/Desktop/קורס למידת עמוקה/images/0"+str(right_filename)[:2]+'/0'+str(right_filename)+'.jpg'
+
+            with open(path1, 'rb') as f:
+                image_data1 = f.read()
+            with open(path2, 'rb') as f:
+                image_data2 = f.read()
+
+            left_img = cv2.imdecode(np.frombuffer(image_data1, np.uint8), cv2.IMREAD_COLOR)
+            right_img = cv2.imdecode(np.frombuffer(image_data2, np.uint8), cv2.IMREAD_COLOR)
+            
+            if left_img is not None and right_img is not None:
+                left_img = cv2.resize(left_img, img_size)
+                right_img = cv2.resize(right_img, img_size)
+                left_images_train.append(left_img)
+                right_images_train.append(right_img)
+                y_train.append(chunk[(chunk['a'] == left_filename)&(chunk['b'] == right_filename)]['count'].values)
+                
+            else:
+                print(f'{left_filename} or {right_filename} doesnt have an image file')
+        except:
+            left_img,right_img  = None,None
+
+        
+    left_images_train = np.array(left_images_train)
+    right_images_train = np.array(right_images_train)
+    y_train = np.array(y_train)
+
+    return left_images_train , right_images_train , y_train
+
+
+
+
+
+
+
+
+
+%%time
+# Read in chunks of data using the desired chunk size
+for chunk in pd.read_csv(r"C:\Users\aviel\Desktop\H&M project\train.csv",nrows=1200, chunksize=100):
+  # Process the chunk of data
+  X1, X2, y = process_chunk(chunk)
+  # Train the model on the processed data using data parallelism
+  model.fit([X1, X2], y, batch_size=32 ,epochs=3, workers=12, use_multiprocessing=True)
+
+
+
